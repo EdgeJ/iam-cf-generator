@@ -2,7 +2,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -46,6 +48,21 @@ type RoleResource struct {
 }
 
 type RoleResources []RoleResource
+
+func decodePolicy(p string) (string, error) {
+	out := bytes.Buffer{}
+	pdoc, err := url.QueryUnescape(p)
+	if err != nil {
+		return "", err
+	}
+
+	// Indent JSON with 2 spaces in keeping with YAML conventions
+	if err := json.Indent(&out, []byte(pdoc), "", "  "); err != nil {
+		return "", err
+	}
+
+	return out.String(), nil
+}
 
 func getGroups(ctx context.Context, client *iam.Client) interface{} {
 	resp, err := client.ListGroups(ctx, &iam.ListGroupsInput{})
@@ -100,7 +117,7 @@ func getPolicies(ctx context.Context, client *iam.Client) interface{} {
 			log.Fatal(err)
 		}
 
-		pdoc, err := url.QueryUnescape(*pver.PolicyVersion.Document)
+		pdoc, err := decodePolicy(*pver.PolicyVersion.Document)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -128,7 +145,7 @@ func getRoles(ctx context.Context, client *iam.Client) interface{} {
 		rec.Path = r.Path
 		rec.Tags = r.Tags
 
-		pdoc, err := url.QueryUnescape(*r.AssumeRolePolicyDocument)
+		pdoc, err := decodePolicy(*r.AssumeRolePolicyDocument)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -194,7 +211,7 @@ Resources:
       Description: {{.Description}}
       {{end}}
       Path: {{.Path}}
-      PolicyDocument: +|
+      PolicyDocument:
 {{ indent .PolicyDocument 8 }}
     {{- if and .Tags }}
       Tags:
@@ -211,7 +228,7 @@ Resources:
   {{.Name}}:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: +|
+      AssumeRolePolicyDocument:
 {{ indent .AssumeRolePolicyDocument 8 }}
       {{- if and .Description }}
       Description: {{.Description}}
