@@ -17,11 +17,63 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
+func decodePolicy(p string) (*string, error) {
+	out := bytes.Buffer{}
+	pdoc, err := url.QueryUnescape(p)
+	if err != nil {
+		return nil, err
+	}
+
+	// Indent JSON with 2 spaces in keeping with YAML conventions
+	if err := json.Indent(&out, []byte(pdoc), "", "  "); err != nil {
+		return nil, err
+	}
+
+	strOut := out.String()
+	return &strOut, nil
+}
+
 type GroupResource struct {
 	Name              *string
 	ManagedPolicyArns []string
 	Path              *string
 	Policies          PolicyResources
+}
+
+func (g *GroupResource) setInlinePolicies(ctx context.Context, client *iam.Client) error {
+	gpolicies, err := client.ListGroupPolicies(ctx, &iam.ListGroupPoliciesInput{
+		GroupName: g.Name,
+	})
+	if err != nil {
+		return err
+	}
+
+	precs := make(PolicyResources, 0, len(gpolicies.PolicyNames))
+
+	for i := range gpolicies.PolicyNames {
+		pname := gpolicies.PolicyNames[i]
+		pout, err := client.GetGroupPolicy(ctx, &iam.GetGroupPolicyInput{
+			GroupName:  g.Name,
+			PolicyName: &pname,
+		})
+		if err != nil {
+			return err
+		}
+
+		pdoc, err := decodePolicy(*pout.PolicyDocument)
+		if err != nil {
+			return err
+		}
+
+		precs = append(precs, PolicyResource{
+			Name:           pout.PolicyName,
+			PolicyDocument: pdoc,
+		})
+	}
+
+	g.Policies = precs
+
+	return nil
 }
 
 type GroupResources []GroupResource
@@ -47,22 +99,43 @@ type RoleResource struct {
 	Tags                     []types.Tag
 }
 
-type RoleResources []RoleResource
-
-func decodePolicy(p string) (string, error) {
-	out := bytes.Buffer{}
-	pdoc, err := url.QueryUnescape(p)
+func (r *RoleResource) setInlinePolicies(ctx context.Context, client *iam.Client) error {
+	rpolicies, err := client.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+		RoleName: r.Name,
+	})
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	// Indent JSON with 2 spaces in keeping with YAML conventions
-	if err := json.Indent(&out, []byte(pdoc), "", "  "); err != nil {
-		return "", err
+	precs := make(PolicyResources, 0, len(rpolicies.PolicyNames))
+
+	for i := range rpolicies.PolicyNames {
+		pname := rpolicies.PolicyNames[i]
+		pout, err := client.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
+			RoleName:   r.Name,
+			PolicyName: &pname,
+		})
+		if err != nil {
+			return err
+		}
+
+		pdoc, err := decodePolicy(*pout.PolicyDocument)
+		if err != nil {
+			return err
+		}
+
+		precs = append(precs, PolicyResource{
+			Name:           pout.PolicyName,
+			PolicyDocument: pdoc,
+		})
 	}
 
-	return out.String(), nil
+	r.Policies = precs
+
+	return nil
 }
+
+type RoleResources []RoleResource
 
 func getGroups(ctx context.Context, client *iam.Client) interface{} {
 	resp, err := client.ListGroups(ctx, &iam.ListGroupsInput{})
@@ -85,6 +158,10 @@ func getGroups(ctx context.Context, client *iam.Client) interface{} {
 
 		for _, p := range gpolicies.AttachedPolicies {
 			rec.ManagedPolicyArns = append(rec.ManagedPolicyArns, *p.PolicyArn)
+		}
+
+		if err := rec.setInlinePolicies(ctx, client); err != nil {
+			log.Fatal(err)
 		}
 
 		groups = append(groups, rec)
@@ -122,7 +199,7 @@ func getPolicies(ctx context.Context, client *iam.Client) interface{} {
 			log.Fatal(err)
 		}
 
-		rec.PolicyDocument = &pdoc
+		rec.PolicyDocument = pdoc
 
 		policies = append(policies, rec)
 	}
@@ -149,7 +226,7 @@ func getRoles(ctx context.Context, client *iam.Client) interface{} {
 		if err != nil {
 			log.Fatal(err)
 		}
-		rec.AssumeRolePolicyDocument = &pdoc
+		rec.AssumeRolePolicyDocument = pdoc
 
 		rpolicies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
 			RoleName: r.RoleName,
@@ -161,6 +238,11 @@ func getRoles(ctx context.Context, client *iam.Client) interface{} {
 		for _, p := range rpolicies.AttachedPolicies {
 			rec.ManagedPolicyArns = append(rec.ManagedPolicyArns, *p.PolicyArn)
 		}
+
+		if err := rec.setInlinePolicies(ctx, client); err != nil {
+			log.Fatal(err)
+		}
+
 		roles = append(roles, rec)
 	}
 
@@ -199,6 +281,14 @@ Resources:
       {{- end }}
       {{- end }}
       Path: {{.Path}}
+      {{- if and .Policies }}
+      Policies:
+      {{- range .Policies }}
+      - PolicyName: {{ .Name }}
+        PolicyDocument:
+{{ indent .PolicyDocument 10 }}
+      {{- end }}
+      {{- end }}
 {{end}}`
 	case PolicyResources:
 		tmplFmt = `---
@@ -248,6 +338,14 @@ Resources:
       {{range .Tags}}
       - Key: {{.Key}}
         Value: {{.Value}}
+      {{- end }}
+      {{- end }}
+      {{- if and .Policies }}
+      Policies:
+      {{- range .Policies }}
+      - PolicyName: {{ .Name }}
+        PolicyDocument:
+{{ indent .PolicyDocument 10 }}
       {{- end }}
       {{- end }}
 {{end}}`
