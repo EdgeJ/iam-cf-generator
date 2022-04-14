@@ -145,9 +145,10 @@ func getGroups(ctx context.Context, client *iam.Client) interface{} {
 
 	groups := make(GroupResources, 0, len(resp.Groups))
 	for _, g := range resp.Groups {
-		rec := GroupResource{}
-		rec.Name = g.GroupName
-		rec.Path = g.Path
+		rec := GroupResource{
+			Name: g.GroupName,
+			Path: g.Path,
+		}
 
 		gpolicies, err := client.ListAttachedGroupPolicies(ctx, &iam.ListAttachedGroupPoliciesInput{
 			GroupName: g.GroupName,
@@ -180,15 +181,24 @@ func getPolicies(ctx context.Context, client *iam.Client) interface{} {
 
 	policies := make(PolicyResources, 0, len(presp.Policies))
 	for _, p := range presp.Policies {
-		rec := PolicyResource{}
-		rec.Name = p.PolicyName
-		rec.Description = p.Description
-		rec.Path = p.Path
-		rec.Tags = p.Tags
+		rec := PolicyResource{
+			Name: p.PolicyName,
+			Path: p.Path,
+			Tags: p.Tags,
+		}
+
+		pdesc, err := client.GetPolicy(ctx, &iam.GetPolicyInput{
+			PolicyArn: p.Arn,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		rec.Description = pdesc.Policy.Description
 
 		pver, err := client.GetPolicyVersion(context.TODO(), &iam.GetPolicyVersionInput{
 			PolicyArn: p.Arn,
-			VersionId: p.DefaultVersionId,
+			VersionId: pdesc.Policy.DefaultVersionId,
 		})
 		if err != nil {
 			log.Fatal(err)
@@ -215,12 +225,13 @@ func getRoles(ctx context.Context, client *iam.Client) interface{} {
 
 	roles := make(RoleResources, 0, len(resp.Roles))
 	for _, r := range resp.Roles {
-		rec := RoleResource{}
-		rec.Name = r.RoleName
-		rec.Description = r.Description
-		rec.MaxSessionDuration = int(*r.MaxSessionDuration)
-		rec.Path = r.Path
-		rec.Tags = r.Tags
+		rec := RoleResource{
+			Name:               r.RoleName,
+			Description:        r.Description,
+			MaxSessionDuration: int(*r.MaxSessionDuration),
+			Path:               r.Path,
+			Tags:               r.Tags,
+		}
 
 		pdoc, err := decodePolicy(*r.AssumeRolePolicyDocument)
 		if err != nil {
@@ -274,6 +285,10 @@ func sanitize(n string) string {
 	return b.String()
 }
 
+func trim(s string) string {
+	return strings.TrimSpace(s)
+}
+
 func render(in interface{}) {
 	var tmplFmt string
 
@@ -281,6 +296,7 @@ func render(in interface{}) {
 	tmpl.Funcs(template.FuncMap{
 		"indent":   indent,
 		"sanitize": sanitize,
+		"trim":     trim,
 	})
 
 	switch t := in.(type) {
@@ -317,8 +333,11 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       {{- if and .Description }}
-      Description: {{.Description}}
-      {{end}}
+      Description: {{ trim .Description }}
+      {{- end }}
+      {{- if and .Path }}
+      Path: {{.Path}}
+      {{- end }}
       PolicyDocument:
 {{ indent .PolicyDocument 8 }}
     {{- if and .Tags }}
@@ -339,7 +358,7 @@ Resources:
       AssumeRolePolicyDocument:
 {{ indent .AssumeRolePolicyDocument 8 }}
       {{- if and .Description }}
-      Description: {{.Description}}
+      Description: {{ trim .Description }}
       {{- end }}
       {{- if and .ManagedPolicyArns }}
       ManagedPolicyArns:
