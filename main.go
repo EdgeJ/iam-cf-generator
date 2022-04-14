@@ -265,13 +265,32 @@ func random() string {
 	return strconv.Itoa(i)
 }
 
+func sanitize(n string) string {
+	if !strings.ContainsAny(n, "-_.") {
+		return n
+	}
+	b := strings.Builder{}
+	ns := strings.Split(n, "-")
+	for _, c := range ns {
+		nu := strings.Split(c, "_")
+		for _, cu := range nu {
+			b.WriteString(strings.ToUpper(string(cu[0])))
+			if len(cu) > 1 {
+				b.WriteString(cu[1:])
+			}
+		}
+	}
+	return b.String()
+}
+
 func render(in interface{}) {
 	var tmplFmt string
 
 	tmpl := template.New("render")
 	tmpl.Funcs(template.FuncMap{
-		"indent": indent,
-		"random": random,
+		"indent":   indent,
+		"random":   random,
+		"sanitize": sanitize,
 	})
 
 	switch t := in.(type) {
@@ -281,7 +300,7 @@ func render(in interface{}) {
 		tmplFmt = `---
 Resources:
 {{- range .}}
-  {{.Name}}:
+  {{ sanitize .Name }}:
     Type: AWS::IAM::Group
     Properties:
       {{- if and .ManagedPolicyArns }}
@@ -304,7 +323,7 @@ Resources:
 		tmplFmt = `---
 Resources:
 {{- range .}}
-  {{.Name}}:
+  {{ sanitize .Name }}:
     Type: AWS::IAM::Policy
     Properties:
       {{- if and .Description }}
@@ -325,7 +344,7 @@ Resources:
 		tmplFmt = `---
 Resources:
 {{- range . }}
-  {{.Name}}:
+  {{ sanitize .Name }}:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
