@@ -7,13 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -259,12 +256,6 @@ func indent(s string, indent int) string {
 	return strings.Join(lines, "\n"+spaces)
 }
 
-func random() string {
-	rand.Seed(time.Now().UnixNano())
-	i := rand.Int()
-	return strconv.Itoa(i)
-}
-
 func sanitize(n string) string {
 	if !strings.ContainsAny(n, "-_.") {
 		return n
@@ -289,7 +280,6 @@ func render(in interface{}) {
 	tmpl := template.New("render")
 	tmpl.Funcs(template.FuncMap{
 		"indent":   indent,
-		"random":   random,
 		"sanitize": sanitize,
 	})
 
@@ -324,12 +314,11 @@ Resources:
 Resources:
 {{- range .}}
   {{ sanitize .Name }}:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
       {{- if and .Description }}
       Description: {{.Description}}
       {{end}}
-      PolicyName: {{.Name}}-{{random}}
       PolicyDocument:
 {{ indent .PolicyDocument 8 }}
     {{- if and .Tags }}
