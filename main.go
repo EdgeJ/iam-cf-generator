@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -256,12 +259,19 @@ func indent(s string, indent int) string {
 	return strings.Join(lines, "\n"+spaces)
 }
 
+func random() string {
+	rand.Seed(time.Now().UnixNano())
+	i := rand.Int()
+	return strconv.Itoa(i)
+}
+
 func render(in interface{}) {
 	var tmplFmt string
 
 	tmpl := template.New("render")
 	tmpl.Funcs(template.FuncMap{
 		"indent": indent,
+		"random": random,
 	})
 
 	switch t := in.(type) {
@@ -300,7 +310,7 @@ Resources:
       {{- if and .Description }}
       Description: {{.Description}}
       {{end}}
-      Path: {{.Path}}
+      PolicyName: {{.Name}}-{{random}}
       PolicyDocument:
 {{ indent .PolicyDocument 8 }}
     {{- if and .Tags }}
